@@ -1,51 +1,57 @@
-from flask import Flask, render_template, request, jsonify
-import sqlite3
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
+import os
 
 app = Flask(__name__)
-DB = 'reservas.db'
+
+# Conexión a PostgreSQL usando variable de entorno
+DATABASE_URL = os.environ.get('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# Tablas
+class Mesa(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    capacidad = db.Column(db.Integer, nullable=False)
+
+class Reserva(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nombre_cliente = db.Column(db.String(100), nullable=False)
+    telefono = db.Column(db.String(50), nullable=False)
+    fecha = db.Column(db.String(20), nullable=False)
+    hora_inicio = db.Column(db.String(10), nullable=False)
+    hora_fin = db.Column(db.String(10), nullable=False)
+    num_personas = db.Column(db.Integer, nullable=False)
+    mesa = db.Column(db.Integer, db.ForeignKey('mesa.id'), nullable=False)
+
+with app.app_context():
+    db.create_all()
 
 # Función para comprobar mesas disponibles
-def mesas_disponibles(fecha, hora_inicio, num_personas):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("SELECT id_mesa, capacidad FROM mesa WHERE capacidad >= ?", (num_personas,))
-    mesas = c.fetchall()
+def mesas_disponibles(fecha, hora, num_personas):
+    reservas = Reserva.query.filter_by(fecha=fecha).all()
+    mesas = Mesa.query.filter(Mesa.capacidad >= num_personas).all()
     disponibles = []
-    for mesa_id, capacidad in mesas:
-        c.execute("""
-        SELECT * FROM reserva
-        WHERE id_mesa = ? AND fecha = ? AND (
-            (hora_inicio <= ? AND hora_fin > ?) OR
-            (hora_inicio < ? AND hora_fin >= ?)
-        )
-        """, (mesa_id, fecha, hora_inicio, hora_inicio, hora_inicio, hora_inicio))
-        if not c.fetchall():
-            disponibles.append({'id_mesa': mesa_id, 'capacidad': capacidad})
-    conn.close()
+
+    hora_dt = datetime.strptime(hora, "%H:%M")
+
+    for mesa in mesas:
+        ocupada = False
+        for r in reservas:
+            if r.mesa == mesa.id:
+                r_inicio = datetime.strptime(r.hora_inicio, "%H:%M")
+                r_fin = datetime.strptime(r.hora_fin, "%H:%M")
+                if (hora_dt >= r_inicio and hora_dt < r_fin):
+                    ocupada = True
+                    break
+        if not ocupada:
+            disponibles.append({'id_mesa': mesa.id})
     return disponibles
 
-# Página cliente
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-# Página admin / tablet
-@app.route('/admin')
-def admin():
-    return render_template('admin.html')
-
-# API: mesas disponibles
-@app.route('/api/disponibles', methods=['POST'])
-def api_disponibles():
-    data = request.json
-    fecha = data['fecha']
-    hora = data['hora']
-    num_personas = int(data['num_personas'])
-    disponibles = mesas_disponibles(fecha, hora, num_personas)
-    return jsonify(disponibles)
-
-# API: crear reserva
+# Crear reserva
 @app.route('/api/reserva', methods=['POST'])
 def api_reserva():
     data = request.json
@@ -61,52 +67,56 @@ def api_reserva():
 
     mesa_id = disponibles[0]['id_mesa']
 
-    # Calcular hora_fin según duración del restaurante
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("SELECT duracion_reserva FROM restaurante WHERE id_restaurante = 1")
-    duracion = c.fetchone()[0]
+    # Suponemos duración de reserva: 90 minutos
+    duracion = 90
     hora_inicio_dt = datetime.strptime(hora, "%H:%M")
     hora_fin_dt = hora_inicio_dt + timedelta(minutes=duracion)
     hora_fin = hora_fin_dt.strftime("%H:%M")
 
-    c.execute("""
-    INSERT INTO reserva (id_restaurante, id_mesa, nombre_cliente, telefono, fecha, hora_inicio, hora_fin, num_personas)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (1, mesa_id, nombre, telefono, fecha, hora, hora_fin, num_personas))
+    reserva = Reserva(
+        nombre_cliente=nombre,
+        telefono=telefono,
+        fecha=fecha,
+        hora_inicio=hora,
+        hora_fin=hora_fin,
+        num_personas=num_personas,
+        mesa=mesa_id
+    )
+    db.session.add(reserva)
+    db.session.commit()
 
-    conn.commit()
-    conn.close()
     return jsonify({'status': 'ok', 'mesa': mesa_id, 'hora_fin': hora_fin})
 
-# API: listar reservas para admin (con id_reserva)
-@app.route('/api/reservas')
+# Listar reservas
+@app.route('/api/reservas', methods=['GET'])
 def api_reservas():
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("SELECT id_reserva, nombre_cliente, telefono, fecha, hora_inicio, hora_fin, num_personas, id_mesa FROM reserva")
-    reservas = c.fetchall()
-    conn.close()
-    return jsonify([{
-        'id': r[0],
-        'nombre': r[1],
-        'telefono': r[2],
-        'fecha': r[3],
-        'hora_inicio': r[4],
-        'hora_fin': r[5],
-        'num_personas': r[6],
-        'mesa': r[7]
-    } for r in reservas])
+    reservas = Reserva.query.all()
+    resultado = []
+    for r in reservas:
+        resultado.append({
+            'nombre': r.nombre_cliente,
+            'telefono': r.telefono,
+            'fecha': r.fecha,
+            'hora_inicio': r.hora_inicio,
+            'hora_fin': r.hora_fin,
+            'num_personas': r.num_personas,
+            'mesa': r.mesa
+        })
+    return jsonify(resultado)
 
-# API: borrar reserva
-@app.route('/api/reserva/<int:id_reserva>', methods=['DELETE'])
-def api_borrar_reserva(id_reserva):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("DELETE FROM reserva WHERE id_reserva = ?", (id_reserva,))
-    conn.commit()
-    conn.close()
-    return jsonify({'status': 'ok', 'message': 'Reserva borrada'})
+# Borrar reserva por ID
+@app.route('/api/reserva/<int:id>', methods=['DELETE'])
+def borrar_reserva(id):
+    reserva = Reserva.query.get(id)
+    if not reserva:
+        return jsonify({'status': 'error', 'message': 'Reserva no encontrada'}), 404
+    db.session.delete(reserva)
+    db.session.commit()
+    return jsonify({'status': 'ok', 'message': 'Reserva eliminada'})
+
+@app.route('/')
+def index():
+    return "API de reservas funcionando ✅"
 
 if __name__ == '__main__':
     app.run(debug=True)
