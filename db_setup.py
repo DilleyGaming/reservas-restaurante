@@ -1,52 +1,45 @@
-import sqlite3
+from app import db, Mesa, Reserva, app
 
-conn = sqlite3.connect('reservas.db')
-c = conn.cursor()
+with app.app_context():
+    # Crear tablas si no existen
+    db.create_all()
 
-# Tabla restaurante
-c.execute('''
-CREATE TABLE IF NOT EXISTS restaurante(
-    id_restaurante INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT,
-    hora_apertura TEXT,
-    hora_cierre TEXT,
-    duracion_reserva INTEGER,
-    max_dias_reserva INTEGER
-)
-''')
+    # Crear mesas de ejemplo si no existen
+    if Mesa.query.count() == 0:
+        mesas_ejemplo = [
+            Mesa(capacidad=2),
+            Mesa(capacidad=2),
+            Mesa(capacidad=4),
+            Mesa(capacidad=4),
+            Mesa(capacidad=6)
+        ]
+        db.session.add_all(mesas_ejemplo)
+        db.session.commit()
+        print("Mesas de ejemplo creadas ✅")
+    else:
+        print("Mesas ya existentes, no se crean nuevas.")
 
-# Tabla mesa
-c.execute('''
-CREATE TABLE IF NOT EXISTS mesa(
-    id_mesa INTEGER PRIMARY KEY AUTOINCREMENT,
-    id_restaurante INTEGER,
-    capacidad INTEGER
-)
-''')
+    # Crear reservas de prueba (opcional)
+    if Reserva.query.count() == 0:
+        from datetime import datetime, timedelta
 
-# Tabla reserva
-c.execute('''
-CREATE TABLE IF NOT EXISTS reserva(
-    id_reserva INTEGER PRIMARY KEY AUTOINCREMENT,
-    id_restaurante INTEGER,
-    id_mesa INTEGER,
-    nombre_cliente TEXT,
-    telefono TEXT,
-    fecha TEXT,
-    hora_inicio TEXT,
-    hora_fin TEXT,
-    num_personas INTEGER
-)
-''')
+        # Tomamos hora actual y añadimos reservas de prueba
+        fecha = datetime.now().strftime("%Y-%m-%d")
+        hora_inicio = "12:00"
+        duracion = 90
+        hora_fin = (datetime.strptime(hora_inicio, "%H:%M") + timedelta(minutes=duracion)).strftime("%H:%M")
 
-# Insertar ejemplo restaurante
-c.execute("INSERT INTO restaurante (nombre, hora_apertura, hora_cierre, duracion_reserva, max_dias_reserva) VALUES (?, ?, ?, ?, ?)",
-          ("Restaurante Ejemplo", "12:00", "22:00", 90, 30))
-
-# Insertar mesas ejemplo
-for capacidad in [2, 4, 4, 6]:
-    c.execute("INSERT INTO mesa (id_restaurante, capacidad) VALUES (?, ?)", (1, capacidad))
-
-conn.commit()
-conn.close()
-print("Base de datos creada con éxito")
+        reserva_prueba = Reserva(
+            nombre_cliente="Cliente Test",
+            telefono="123456789",
+            fecha=fecha,
+            hora_inicio=hora_inicio,
+            hora_fin=hora_fin,
+            num_personas=2,
+            mesa=1  # primera mesa
+        )
+        db.session.add(reserva_prueba)
+        db.session.commit()
+        print("Reserva de prueba creada ✅")
+    else:
+        print("Reservas ya existen, no se crean nuevas.")
