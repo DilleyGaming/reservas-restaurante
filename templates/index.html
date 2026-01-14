@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="stylesheet" href="/static/style.css">
+<title>Reservas Restaurante</title>
+</head>
+<body>
+<h1>Reservar mesa</h1>
+<form id="reservaForm">
+<label>Nombre: <input type="text" id="nombre" required></label><br>
+<label>Teléfono: <input type="text" id="telefono" required></label><br>
+<label>Fecha: <input type="date" id="fecha" required></label><br>
+<label>Hora: <input type="time" id="hora" required></label><br>
+<label>Personas: <input type="number" id="personas" required min="1"></label><br>
+<button type="submit">Reservar</button>
+</form>
+<div id="resultado"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
